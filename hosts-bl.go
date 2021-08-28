@@ -14,7 +14,7 @@ import (
 //Function to display help text and exit
 func help(err int) {
 	os.Stdout.WriteString(
-		"Usage: hosts-convert [options...] <source> <destination>\n"+
+		"Usage: hosts-bl [options...] <source> <destination>\n"+
 		" -comments               Don't remove comments\n"+
 		" -compression <number>   Number of domains per line, 1 to 9\n"+
 		" -dupe                   Don't check for and remove duplicates\n"+
