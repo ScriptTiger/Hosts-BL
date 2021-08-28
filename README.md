@@ -3,7 +3,7 @@
 # Hosts-BL  
 Simple tool to handle hosts file black lists that can remove comments, remove duplicates, compress to 9 domains per line, add IPv6 entries, as well as can convert black lists to multiple other black list formats compatible with other software.
 
-Usage: `hosts-convert [options...] <source> <destination>`
+Usage: `hosts-bl [options...] <source> <destination>`
  Argument                 | Description
 --------------------------|--------------------------------------
  `-comments`              | Don't remove comments
