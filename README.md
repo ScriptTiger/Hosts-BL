@@ -4,14 +4,15 @@
 Simple tool to handle hosts file black lists that can remove comments, remove duplicates, compress to 9 domains per line, add IPv6 entries, as well as can convert black lists to multiple other black list formats compatible with other software.
 
 Usage: `hosts-bl [options...] <source> <destination>`
- Argument                 | Description
---------------------------|--------------------------------------
+
+Argument                  | Description
+--------------------------|-----------------------------------------------------------------------------------------------------
  `-comments`              | Don't remove comments
  `-compression <number>`  | Number of domains per line, 1 to 9
  `-dupe`                  | Don't check for and remove duplicates
  `-f <format>`            | Destination format:
- ------------------------ | dnsmasq,dualserver,fqdn,hosts,
- ------------------------ | ipv6,privoxy,rfqdn,rpz,unbound
+--------------------------| dnsmasq,dualserver,fqdn,hosts,
+--------------------------| ipv6,privoxy,rfqdn,rpz,unbound
  `-from_blackhole <IPv4>` | Black hole address in source
  `-i <file>`              | Source file
  `-o <file>`              | Destination file
