@@ -3,4 +3,4 @@
 package main
 
 //Set line endings to LF
-var eol string = "\n"
+const eol = "\n"

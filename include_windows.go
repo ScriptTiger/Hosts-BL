@@ -3,4 +3,4 @@
 package main
 
 //Set line endings to CRLF
-var eol string = "\r\n"
+const eol = "\r\n"

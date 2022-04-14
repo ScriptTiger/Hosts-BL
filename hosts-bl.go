@@ -4,7 +4,6 @@ package main
 import (
 	"bufio"
 	"index/suffixarray"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -156,7 +155,7 @@ func main() {
 	format := strings.ToLower(*fmtPtr)
 
 	//Initialize data from file
-	rawData, err := ioutil.ReadFile(*ifilePtr)
+	rawData, err := os.ReadFile(*ifilePtr)
 	if err != nil {help(6)}
 
 	//Convert data to string and initialize variable for cleaning
@@ -218,7 +217,7 @@ func main() {
 
 	//If requested format is FQDN, just dump to file and exit
 	if format == "fqdn" {
-		ioutil.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 644)
+		os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 644)
 		os.Exit(0)
 	}
 
@@ -246,7 +245,7 @@ func main() {
 
 	//If requested format is reduced FQDN, just dump to file and exit
 	if format == "rfqdn" {
-		ioutil.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 644)
+		os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 644)
 		os.Exit(0)
 	}
 
@@ -341,6 +340,6 @@ func main() {
 	oData = nil
 
 	//Write formatted data to output file and exit
-	ioutil.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 644)
+	os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 644)
 	os.Exit(0)
 }
