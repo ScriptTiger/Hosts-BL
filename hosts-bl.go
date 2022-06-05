@@ -17,8 +17,8 @@ func help(err int) {
 		" -compression <number>   Number of domains per line, 1 to 9\n"+
 		" -dupe                   Don't check for and remove duplicates\n"+
 		" -f <format>             Destination format:\n"+
-		"                         dnsmasq,dualserver,fqdn,hosts,\n"+
-		"                         ipv6,privoxy,rfqdn,rpz,unbound\n"+
+		"                         adblock,dnsmasq,dualserver,fqdn,\n"+
+		"                         hosts,ipv6,privoxy,rfqdn,rpz,unbound\n"+
 		" -from_blackhole <IPv4>  Black hole address in source\n"+
 		" -i <file>               Source file\n"+
 		" -o <file>               Destination file\n"+
@@ -35,7 +35,8 @@ func compressable(format string) bool {
 
 //Function to check if format is reducible or not
 func reducible(format string) bool {
-	rformat := [...]string{
+	rformat := [6]string{
+		"adblock",
 		"rfqdn",
 		"dnsmasq",
 		"privoxy",
@@ -304,6 +305,12 @@ func main() {
 				} else {
 					oData = append(oData, *tbhPtr+" "+iData[i])
 					oData = append(oData, *tbh6Ptr+" "+iData[i])
+				}
+			case "adblock":
+				if strings.HasPrefix(iData[i], "#") {
+					oData = append(oData, "!"+strings.TrimPrefix(iData[i], "#"))
+				} else {
+					oData = append(oData, "||"+iData[i]+"^")
 				}
 			case "dnsmasq":
 				if strings.HasPrefix(iData[i], "#") {
