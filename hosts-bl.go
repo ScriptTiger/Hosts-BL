@@ -2,7 +2,6 @@ package main
 
 //Import dependency packages
 import (
-	"bufio"
 	"index/suffixarray"
 	"os"
 	"path/filepath"
@@ -172,12 +171,13 @@ func main() {
 	}
 
 	//Initialize scanner to scan data
-	scanner := bufio.NewScanner(strings.NewReader(filteredData))
+	iData = strings.Split(filteredData, "\n")
+	filteredData = ""
 
 	//Scan through and extract clean data into array
-	for scanner.Scan() {
-		line = scanner.Text()
+	for _, line := range iData {
 		tokens = strings.Fields(line)
+		if len(tokens) == 0 {continue}
 		if tokens[0] == *fbhPtr {
 			if tokens[1] != "0.0.0.0" {oData = append(oData, tokens[1])}
 		} else if *cmtsPtr {

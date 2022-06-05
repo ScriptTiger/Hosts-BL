@@ -28,6 +28,8 @@ set file=%app%_%GOOS%_%GOARCH%
 set include=include_other.go
 call :Build_OS
 
+if %GOARCH% == 386 exit /b
+
 set GOOS=darwin
 set file=%app%_%GOOS%_%GOARCH%.app
 set include=include_other.go
