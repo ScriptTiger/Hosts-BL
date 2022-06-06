@@ -11,8 +11,8 @@ Argument                  | Description
  `-compression <number>`  | Number of domains per line, 1 to 9
  `-dupe`                  | Don't check for and remove duplicates
  `-f <format>`            | Destination format:
---------------------------| **dnsmasq, dualserver, fqdn, hosts,**
---------------------------| **ipv6, privoxy, rfqdn, rpz, unbound**
+--------------------------| **adblock, dnsmasq, dualserver, fqdn,**
+--------------------------| **hosts, ipv6, privoxy, rfqdn, rpz, unbound**
  `-from_blackhole <IPv4>` | Black hole address in source
  `-i <file>`              | Source file
  `-o <file>`              | Destination file
