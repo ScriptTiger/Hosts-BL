@@ -218,7 +218,7 @@ func main() {
 
 	//If requested format is FQDN, just dump to file and exit
 	if format == "fqdn" {
-		os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 644)
+		os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 0644)
 		os.Exit(0)
 	}
 
@@ -246,7 +246,7 @@ func main() {
 
 	//If requested format is reduced FQDN, just dump to file and exit
 	if format == "rfqdn" {
-		os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 644)
+		os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 0644)
 		os.Exit(0)
 	}
 
@@ -347,6 +347,6 @@ func main() {
 	oData = nil
 
 	//Write formatted data to output file and exit
-	os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 644)
+	os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 0644)
 	os.Exit(0)
 }
