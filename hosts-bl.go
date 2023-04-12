@@ -3,6 +3,7 @@ package main
 //Import dependency packages
 import (
 	"index/suffixarray"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -50,9 +51,6 @@ func reducible(format string) bool {
 
 func main() {
 
-	//If no arguments given, display help
-	if len(os.Args) == 1 {help(0)}
-
 	//Declare variables
 	var (
 		//Flag pointers
@@ -68,6 +66,7 @@ func main() {
 
 		//Common variables
 		err error
+		rawData	[]byte
 		index *suffixarray.Index
 		iData []string
 		oData []string
@@ -95,6 +94,10 @@ func main() {
 	*tbh6Ptr = "::"
 	*cmtsPtr = false
 	dPtr = cmtsPtr
+
+	//Check if any data available from standard input and use it as default source if there is
+	stdinStat, _ := os.Stdin.Stat()
+	if stdinStat.Mode() & os.ModeNamedPipe != 0 {*ifilePtr = "-"}
 
 	//Push arguments to flag pointers
 	for i := 1; i < len(os.Args); i++ {
@@ -144,18 +147,23 @@ func main() {
 		} else {help(4)}
 	}
 
-	//Set default input and output files if none given
-	if *ifilePtr == "" {
-		if os.Args[1] == "" {help(5)
-		} else {*ifilePtr = os.Args[1]}
+	//Print help if no input available
+	if *ifilePtr == "" {help(0)}
+
+	//Set default output if none specified
+	if *ofilePtr == "" {
+		if *ifilePtr == "-" {*ofilePtr = "-"
+		} else {*ofilePtr = *fmtPtr+"-"+filepath.Base(*ifilePtr)}
 	}
-	if *ofilePtr == "" {*ofilePtr = *fmtPtr+"-"+filepath.Base(*ifilePtr)}
 
 	//Initialize format string for quick reference
 	format := strings.ToLower(*fmtPtr)
 
-	//Initialize data from file
-	rawData, err := os.ReadFile(*ifilePtr)
+	//Initialize data from either stdin or file
+	if *ifilePtr == "-" {
+		rawData, err = io.ReadAll(os.Stdin)
+		if err != nil {help(5)}
+	} else {rawData, err = os.ReadFile(*ifilePtr)}
 	if err != nil {help(6)}
 
 	//Convert data to string and initialize variable for cleaning
@@ -216,9 +224,10 @@ func main() {
 		oData = nil
 	}
 
-	//If requested format is FQDN, just dump to file and exit
+	//If requested format is FQDN, just dump to file or stdout and exit
 	if format == "fqdn" {
-		os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 0644)
+		if *ofilePtr == "-" {os.Stdout.WriteString(strings.Join(iData, eol)+eol)
+		} else {os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 0644)}
 		os.Exit(0)
 	}
 
@@ -244,9 +253,10 @@ func main() {
 		oData = nil
 	}
 
-	//If requested format is reduced FQDN, just dump to file and exit
+	//If requested format is reduced FQDN, just dump to file or stdout and exit
 	if format == "rfqdn" {
-		os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 0644)
+		if *ofilePtr == "-" {os.Stdout.WriteString(strings.Join(iData, eol)+eol)
+		} else {os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 0644)}
 		os.Exit(0)
 	}
 
@@ -346,7 +356,8 @@ func main() {
 	iData = oData
 	oData = nil
 
-	//Write formatted data to output file and exit
-	os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 0644)
+	//Write formatted data to output file or stdout and exit
+	if *ofilePtr == "-" {os.Stdout.WriteString(strings.Join(iData, eol)+eol)
+	} else {os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 0644)}
 	os.Exit(0)
 }
