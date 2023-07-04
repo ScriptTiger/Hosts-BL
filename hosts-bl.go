@@ -1,6 +1,6 @@
 package main
 
-//Import dependency packages
+// Import dependency packages
 import (
 	"index/suffixarray"
 	"io"
@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-//Function to display help text and exit
+// Function to display help text and exit
 func help(err int) {
 	os.Stdout.WriteString(
 		"Usage: hosts-bl [options...] <source> <destination>\n"+
@@ -28,13 +28,13 @@ func help(err int) {
 	os.Exit(err)
 }
 
-//Function to check if format is compressable or not
+// Function to check if format is compressable or not
 func compressable(format string) bool {
 	if format == "hosts" || format == "ipv6" {return true}
 	return false
 }
 
-//Function to check if format is reducible or not
+// Function to check if format is reducible or not
 func reducible(format string) bool {
 	rformat := [6]string{
 		"adblock",
@@ -47,6 +47,13 @@ func reducible(format string) bool {
 		if format == rformat[i] {return true}
 	}
 	return false
+}
+
+// Function to write to file or stdout and exit
+func writeFile(ofilePtr *string, iData *[]string) {
+	if *ofilePtr == "-" {os.Stdout.WriteString(strings.Join(*iData, eol)+eol)
+	} else {os.WriteFile(*ofilePtr, []byte(strings.Join(*iData, eol)+eol), 0644)}
+	os.Exit(0)
 }
 
 func main() {
@@ -225,11 +232,7 @@ func main() {
 	}
 
 	//If requested format is FQDN, just dump to file or stdout and exit
-	if format == "fqdn" {
-		if *ofilePtr == "-" {os.Stdout.WriteString(strings.Join(iData, eol)+eol)
-		} else {os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 0644)}
-		os.Exit(0)
-	}
+	if format == "fqdn" {writeFile(ofilePtr, &iData)}
 
 	//Reduce domains if needed
 	if reducible(format) {
@@ -254,11 +257,7 @@ func main() {
 	}
 
 	//If requested format is reduced FQDN, just dump to file or stdout and exit
-	if format == "rfqdn" {
-		if *ofilePtr == "-" {os.Stdout.WriteString(strings.Join(iData, eol)+eol)
-		} else {os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 0644)}
-		os.Exit(0)
-	}
+	if format == "rfqdn" {writeFile(ofilePtr, &iData)}
 
 	//Compress data if needed
 	if compressable(format) && *cmpPtr > 1 {
@@ -357,7 +356,5 @@ func main() {
 	oData = nil
 
 	//Write formatted data to output file or stdout and exit
-	if *ofilePtr == "-" {os.Stdout.WriteString(strings.Join(iData, eol)+eol)
-	} else {os.WriteFile(*ofilePtr, []byte(strings.Join(iData, eol)+eol), 0644)}
-	os.Exit(0)
+	writeFile(ofilePtr, &iData)
 }
