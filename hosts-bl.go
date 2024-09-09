@@ -2,12 +2,33 @@ package main
 
 // Import dependency packages
 import (
+	"bufio"
+	"bytes"
+	"encoding/binary"
+	//"hash"
+	//"hash/fnv"
+	"hash/maphash"
 	"index/suffixarray"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+)
+
+// Globals
+var (
+	index [][]uint64
+	saIndex *suffixarray.Index
+	saBuffer *bytes.Buffer
+	lookupBuffer *bytes.Buffer
+	hostID int
+	glob strings.Builder
+	cmpLvl int = -1
+	wasHost bool
+	hasher maphash.Hash
+	//hasher hash.Hash64
 )
 
 // Function to display help text and exit
@@ -28,14 +49,8 @@ func help(err int) {
 	os.Exit(err)
 }
 
-// Function to check if format is compressable or not
-func compressable(format string) bool {
-	if format == "hosts" || format == "ipv6" {return true}
-	return false
-}
-
 // Function to check if format is reducible or not
-func reducible(format string) bool {
+func isReducible(format string) bool {
 	rformat := [6]string{
 		"adblock",
 		"rfqdn",
@@ -49,312 +64,372 @@ func reducible(format string) bool {
 	return false
 }
 
-// Function to write to file or stdout and exit
-func writeFile(ofilePtr *string, iData *[]string) {
-	if *ofilePtr == "-" {os.Stdout.WriteString(strings.Join(*iData, eol)+eol)
-	} else {os.WriteFile(*ofilePtr, []byte(strings.Join(*iData, eol)+eol), 0644)}
-	os.Exit(0)
+// Function to check if format is valid
+func isValidFormat(format string) bool {
+	if isReducible(format) {return true}
+	vformat := [4]string{
+		"fqdn",
+		"hosts",
+		"ipv6",
+		"dualserver",
+	}
+	for i := 0; i < len(vformat); i++ {
+		if format == vformat[i] {return true}
+	}
+	return false
+}
+
+// Function to hash
+func makeHash(host string) (hostHash uint64) {
+	hasher.WriteString(host)
+	//hasher.Write([]byte(host))
+	hostHash = hasher.Sum64()
+	hasher.Reset()
+	return
+}
+
+// Function to build index
+func buildIndex(hosts []string, format string) {
+	for _, host := range hosts {
+		hostHash := makeHash(host)
+		index = append(index, []uint64{uint64(hostID), hostHash})
+		if isReducible(format) {
+			binary.Write(saBuffer, binary.LittleEndian, hostHash)
+			binary.Write(saBuffer, binary.LittleEndian, uint64(0))
+		}
+		hostID++
+	}
+}
+
+// Function to format output and write to file/stdout
+func writeLine(hosts []string, writer *bufio.Writer, format string, dupe, cmts bool, cmp int, tbhPtr, tbh6Ptr *string) {
+	for _, host := range hosts {
+		if !strings.HasPrefix(host, "#") {
+			if (dupe && !isReducible(format))|| index[hostID][1] != 0 {
+				switch format {
+					case "hosts":
+						compress(host, format, cmp, true, tbhPtr, tbh6Ptr, writer)
+					case "ipv6":
+						compress(host, format, cmp, true, tbhPtr, tbh6Ptr, writer)
+					case "dualserver":
+						writer.WriteString(host+"="+*tbhPtr+eol)
+					case "adblock":
+						writer.WriteString("||"+host+"^"+eol)
+					case "dnsmasq":
+						writer.WriteString("address=/"+host+"/"+eol)
+					case "privoxy":
+						writer.WriteString(
+							host+eol+
+							"."+host+eol,
+						)
+					case "rpz":
+						writer.WriteString(
+							host+" CNAME ."+eol+
+							"*."+host+" CNAME ."+eol,
+						)
+					case "unbound":
+						writer.WriteString("local-zone: \""+host+"\" always_nxdomain"+eol)
+					default:
+						writer.WriteString(host+eol)
+				}
+			}
+			hostID++
+		} else if cmts {
+			switch format {
+				case "hosts":
+					compress(host, format, cmp, false, tbhPtr, tbh6Ptr, writer)
+				case "ipv6":
+					compress(host, format, cmp, false, tbhPtr, tbh6Ptr, writer)
+				case "adblock":
+					writer.WriteString("!"+strings.TrimPrefix(host, "#")+eol)
+				case "rpz":
+					writer.WriteString(";"+strings.TrimPrefix(host, "#")+eol)
+				default:
+					writer.WriteString(host+eol)
+			}
+		}
+	}
+}
+
+// Function to compress hosts
+func compress(host, format string, cmp int, isHost bool, tbhPtr, tbh6Ptr *string, writer *bufio.Writer) {
+	if cmp == 1 {
+		if isHost {
+			if format == "hosts" {
+				writer.WriteString(*tbhPtr+" "+host+eol)
+			} else {
+				writer.WriteString(
+					*tbhPtr+" "+host+eol+
+					*tbh6Ptr+" "+host+eol,
+				)
+			}
+		} else {writer.WriteString(host+eol)}
+		return
+	}
+	if cmpLvl == -1 {
+		wasHost = isHost
+		cmpLvl++
+	} else if wasHost != isHost {
+		flushGlob(format, wasHost, tbhPtr, tbh6Ptr, writer)
+		wasHost = isHost
+	}
+	if isHost {
+		glob.WriteString(" "+host)
+		cmpLvl++
+		if cmpLvl == cmp {flushGlob(format, isHost, tbhPtr, tbh6Ptr, writer)}
+	} else {glob.WriteString(host)}
+}
+
+// Function to flush glob
+func flushGlob(format string, isHost bool, tbhPtr, tbh6Ptr *string, writer *bufio.Writer) {
+	if isHost {
+		if format == "hosts" {
+			writer.WriteString(*tbhPtr+glob.String()+eol)
+		} else {
+			writer.WriteString(
+				*tbhPtr+glob.String()+eol+
+				*tbh6Ptr+glob.String()+eol,
+			)
+		}
+	} else {writer.WriteString(glob.String()+eol)}
+	cmpLvl = 0
+	glob.Reset()
+}
+
+// Function to zero out subdomains of domains already present
+func deSub(hosts []string) {
+	for _, host := range hosts {
+		parentString := host
+		parentCount := len(strings.Split(parentString, "."))
+		for ; parentCount > 2; parentCount-- {
+			parentString = strings.Join(strings.Split(parentString, ".")[1:], ".")
+ 			hostHash := makeHash(parentString)
+			binary.Write(lookupBuffer, binary.LittleEndian, uint64(0))
+			binary.Write(lookupBuffer, binary.LittleEndian, hostHash)
+			binary.Write(lookupBuffer, binary.LittleEndian, uint64(0))
+			offsets := saIndex.Lookup(lookupBuffer.Bytes(), 1)
+			lookupBuffer.Reset()
+			if offsets != nil {
+				index[hostID][1] = 0
+				break
+			}
+		}
+		hostID++
+	}
+}
+
+// Function to zero out duplicate hosts on index
+func deDupe() {
+	sort.SliceStable(index, func(i, j int) bool {
+		return index[i][1] < index[j][1]
+	})
+	var lastLookup uint64
+	for i, lookup := range index {
+		if lookup[1] == lastLookup {index[i][1] = 0
+		} else {lastLookup = lookup[1]}
+	}
+	sort.Slice(index, func(i, j int) bool {
+		return index[i][0] < index[j][0]
+	})
+}
+
+// Function to scrub input
+func scrubInput(line string, fbhPtr *string, cmts bool) ([]string) {
+	if strings.ContainsAny(line, " .") && strings.HasPrefix(line, *fbhPtr) {
+		line = strings.SplitAfterN(line, " ", 2)[1]
+		if strings.ContainsAny(line, "#") {line = strings.TrimSuffix(strings.SplitAfterN(line, "#", 2)[0], "#")}
+		line = strings.TrimSpace(line)
+		if line == "0.0.0.0" {return nil}
+		return strings.Fields(line)
+	} else if cmts && strings.HasPrefix(line, "#") {return []string{line}}
+	return nil
 }
 
 func main() {
 
-	//Declare variables
+	// Declare variables
 	var (
-		//Flag pointers
+		// Flags
 		fmtPtr *string
-		ifilePtr *string
-		cmpPtr *int
+		iFilePtr *string
+		oFilePtr *string
+		cmp int
 		fbhPtr *string
 		tbhPtr *string
 		tbh6Ptr *string
-		cmtsPtr *bool
-		dPtr *bool
-		ofilePtr *string
+		dupe bool
+		cmts bool
 
-		//Common variables
+		// Common variables
 		err error
-		rawData	[]byte
-		index *suffixarray.Index
-		iData []string
-		oData []string
-		count int
-		line string
-		tokens []string
-		offsets []int
-		domainLine bool
+		iFile *os.File
+		oFile *os.File
+		iData []byte
+		iReader *bytes.Reader
+		scanner *bufio.Scanner
 	)
 
-	//Initialize flag pointers
-	ifilePtr = new(string)
-	cmpPtr = new(int)
+	// Initialize flag pointers
+	iFilePtr = new(string)
+	oFilePtr = new(string)
 	fmtPtr = new(string)
 	fbhPtr = new(string)
 	tbh6Ptr = new(string)
-	cmtsPtr = new(bool)
-	ofilePtr = new(string)
 
-	//Default flag values
-	*cmpPtr = 9
+	// Default flag values
+	*iFilePtr = ""
+	*oFilePtr = ""
+	cmp = -1
 	*fmtPtr = "hosts"
 	*fbhPtr = "0.0.0.0"
 	tbhPtr = fbhPtr
 	*tbh6Ptr = "::"
-	*cmtsPtr = false
-	dPtr = cmtsPtr
+	dupe = false
+	cmts = false
 
-	//Check if any data available from standard input and use it as default source if there is
+	// Check if any data available from standard input and use it as default source if there is
 	stdinStat, _ := os.Stdin.Stat()
-	if stdinStat.Mode() & os.ModeNamedPipe != 0 {*ifilePtr = "-"}
+	if stdinStat.Mode() & os.ModeNamedPipe != 0 {*iFilePtr = "-"}
 
-	//Push arguments to flag pointers
+	// Push arguments to flag pointers
 	for i := 1; i < len(os.Args); i++ {
 		if strings.HasPrefix(os.Args[i], "-") {
 			switch strings.TrimPrefix(os.Args[i], "-") {
 				case "f":
 					i++
+					if *fmtPtr != "hosts" {help(1)}
 					fmtPtr = &os.Args[i]
 					continue
 				case "i":
 					i++
-					ifilePtr = &os.Args[i]
+					if *iFilePtr != "" {help(2)}
+					iFilePtr = &os.Args[i]
 					continue
 				case "compression":
 					i++
-					*cmpPtr, err = strconv.Atoi(os.Args[i])
-					if err != nil {help(1)}
-					if *cmpPtr < 1 || *cmpPtr > 9 {help(2)}
+					if cmp != -1 {help(3)}
+					cmp, err = strconv.Atoi(os.Args[i])
+					if err != nil {help(4)}
+					if cmp < 1 || cmp > 9 {help(5)}
 					continue
 				case "from_blackhole":
 					i++
+					if *fbhPtr != "0.0.0.0" {help(6)}
 					fbhPtr = &os.Args[i]
 					continue
 				case "to_blackhole":
 					i++
+					if *tbhPtr != "0.0.0.0" {help(7)}
 					tbhPtr = &os.Args[i]
 					continue
 				case "to_blackhole_v6":
 					i++
+					if *tbh6Ptr != "::" {help(8)}
 					tbh6Ptr = &os.Args[i]
 					continue
 				case "comments":
-					*cmtsPtr = true
+					if cmts {help(9)}
+					cmts = true
 					continue
 				case "dupe":
-					*dPtr = true
+					if dupe {help(10)}
+					dupe = true
 					continue
 				case "o":
 					i++
-					ofilePtr = &os.Args[i]
+					if *oFilePtr != "" {help(11)}
+					oFilePtr = &os.Args[i]
 					continue
 				default:
-					help(3)
+					help(12)
 			}
-		} else if *ifilePtr == "" {ifilePtr = &os.Args[i]
-		} else if *ofilePtr == "" {ofilePtr = &os.Args[i]
-		} else {help(4)}
+		} else if *iFilePtr == "" {iFilePtr = &os.Args[i]
+		} else if *oFilePtr == "" {oFilePtr = &os.Args[i]
+		} else {help(13)}
 	}
 
-	//Print help if no input available
-	if *ifilePtr == "" {help(0)}
+	// Print help if no input available
+	if *iFilePtr == "" {help(0)}
 
-	//Set default output if none specified
-	if *ofilePtr == "" {
-		if *ifilePtr == "-" {*ofilePtr = "-"
-		} else {*ofilePtr = *fmtPtr+"-"+filepath.Base(*ifilePtr)}
-	}
-
-	//Initialize format string for quick reference
+	// Initialize format string for quick reference
 	format := strings.ToLower(*fmtPtr)
 
-	//Initialize data from either stdin or file
-	if *ifilePtr == "-" {
-		rawData, err = io.ReadAll(os.Stdin)
-		if err != nil {help(5)}
-	} else {rawData, err = os.ReadFile(*ifilePtr)}
-	if err != nil {help(6)}
+	// Exit if invalid format is given
+	if !isValidFormat(format) {help(14)}
 
-	//Convert data to string and initialize variable for cleaning
-	filteredData := string(rawData)
+	// Set default compression if none specified
+	if cmp == -1 {cmp = 9}
 
-	//Conform line endings
-	for strings.Contains(filteredData, "\r\n") || strings.Contains(filteredData, "\n\n") {
-		for strings.Contains(filteredData, "\r\n") {
-			filteredData = strings.Replace(filteredData, "\r\n", "\n", -1)
-		}
-		for strings.Contains(filteredData, "\n\n") {
-			filteredData = strings.Replace(filteredData, "\n\n", "\n", -1)
+	// Set default output if none specified
+	if *oFilePtr == "" {
+		if *iFilePtr == "-" {*oFilePtr = "-"
+		} else {*oFilePtr = *fmtPtr+"-"+filepath.Base(*iFilePtr)}
+	}
+
+	// Set file handles and associated buffered I/O
+	if *iFilePtr == "-" {
+		iData, err = io.ReadAll(os.Stdin)
+		iReader = bytes.NewReader(iData)
+	} else {
+		iFile, err = os.Open(*iFilePtr)
+		defer iFile.Close()
+	}
+	if err != nil {panic(err)}
+
+	if *oFilePtr == "-" {oFile = os.Stdout
+	} else {
+		oFile, err = os.Create(*oFilePtr)
+		if err != nil {panic(err)}
+		defer oFile.Close()
+	}
+	writer := bufio.NewWriter(oFile)
+
+	// Initialize hasher
+	hasher.SetSeed(maphash.MakeSeed())
+	//hasher = fnv.New64a()
+
+	// Initialize buffers
+	saBuffer = new(bytes.Buffer)
+	lookupBuffer = new(bytes.Buffer)
+	binary.Write(saBuffer, binary.LittleEndian, uint64(0))
+
+	// Build index
+	if !dupe || isReducible(format) {
+		if *iFilePtr == "-" {scanner = bufio.NewScanner(iReader)
+		} else {scanner = bufio.NewScanner(iFile)}
+		for scanner.Scan() {buildIndex(scrubInput(scanner.Text(), fbhPtr, false), format)}
+		if isReducible(format) {
+			saIndex = suffixarray.New(saBuffer.Bytes())
 		}
 	}
 
-	//Initialize scanner to scan data
-	iData = strings.Split(filteredData, "\n")
-	filteredData = ""
+	// Zero out duplicates as needed
+	if !dupe {deDupe()}
 
-	//Scan through and extract clean data into array
-	for _, line := range iData {
-		tokens = strings.Fields(line)
-		if len(tokens) == 0 {continue}
-		if tokens[0] == *fbhPtr {
-			if tokens[1] != "0.0.0.0" {oData = append(oData, tokens[1])}
-		} else if *cmtsPtr {
-			if strings.HasPrefix(line, "#") {oData = append(oData, line)}
+	// Zero out subdomains as needed
+	if isReducible(format) {
+		hostID = 0
+		if *iFilePtr == "-" {
+			iReader.Seek(0, io.SeekStart)
+			scanner = bufio.NewScanner(iReader)
+		} else {
+			iFile.Seek(0, io.SeekStart)
+			scanner = bufio.NewScanner(iFile)
 		}
+		for scanner.Scan() {deSub(scrubInput(scanner.Text(), fbhPtr, false))}
 	}
 
-	iData = oData
-	oData = nil
-
-	//Initialize search index if needed
-	if !*dPtr || reducible(format) {index = suffixarray.New([]byte("\n"+strings.Join(iData, "\n")+"\n"))}
-
-	//Remove duplicates if needed
-	if !*dPtr {
-		for i := 0; i < len(iData); i++ {
-			if strings.HasPrefix(iData[i], "#") {
-					oData = append(oData, iData[i])
-			} else {
-				offsets = index.Lookup([]byte("\n"+iData[i]+"\n"), 2)
-				if len(offsets) == 1 {oData = append(oData, iData[i])
-				} else {
-					count = 0
-					for a := 0; a < len(oData); a++ {
-						if oData[a] == iData[i] {
-							count++
-							break
-						}
-					}
-					if count == 0 {oData = append(oData, iData[i])}
-				}
-			}
-		}
-		iData = oData
-		oData = nil
+	// Format and write final list
+	hostID = 0
+	if *iFilePtr == "-" {
+		iReader.Seek(0, io.SeekStart)
+		scanner = bufio.NewScanner(iReader)
+	} else {
+		iFile.Seek(0, io.SeekStart)
+		scanner = bufio.NewScanner(iFile)
 	}
+	for scanner.Scan() {writeLine(scrubInput(scanner.Text(), fbhPtr, true), writer, format, dupe, cmts, cmp, tbhPtr, tbh6Ptr)}
+	if glob.Len() != 0 {flushGlob(format, wasHost, tbhPtr, tbh6Ptr, writer)}
+	writer.Flush()
 
-	//If requested format is FQDN, just dump to file or stdout and exit
-	if format == "fqdn" {writeFile(ofilePtr, &iData)}
-
-	//Reduce domains if needed
-	if reducible(format) {
-		for i := 0; i < len(iData); i++ {
-			if strings.HasPrefix(iData[i], "#") {
-				oData = append(oData, iData[i])
-			} else {
-				tokens = strings.Split(iData[i], ".")
-				if len(tokens) <= 2 {oData = append(oData, iData[i])
-				} else {
-					count = 0
-					for a := 1; a <= len(tokens)-2; a++ {
-						offsets = index.Lookup([]byte("\n"+strings.Join(tokens[a:], ".")+"\n"), 1)
-						if offsets != nil {count++}
-					}
-					if count == 0 {oData = append(oData, iData[i])}
-				}
-			}	
-		}
-		iData = oData
-		oData = nil
-	}
-
-	//If requested format is reduced FQDN, just dump to file or stdout and exit
-	if format == "rfqdn" {writeFile(ofilePtr, &iData)}
-
-	//Compress data if needed
-	if compressable(format) && *cmpPtr > 1 {
-		line = ""
-		count = 0
-		for i := 0; i < len(iData); i++ {
-			if strings.HasPrefix(iData[i], "#") {
-				if i == 0 || domainLine == false {line = line+iData[i]
-				} else if line != "" {
-					oData = append(oData, strings.TrimPrefix(line, " "))
-					line = iData[i]
-				}
-				domainLine = false
-			} else {
-				count++
-				if i == 0 {line = iData[i]
-				} else if domainLine == true {line = line+" "+iData[i]
-				} else {
-					if line != "" {
-						oData = append(oData, line)
-						line = iData[i]
-					}
-					count = 1
-				}
-				if count == *cmpPtr {
-					if line != "" {
-						oData = append(oData, strings.TrimPrefix(line, " "))
-						line = ""
-					}
-					count = 0
-				}
-				domainLine = true
-			}
-		}
-		if line != "" {oData = append(oData, strings.TrimPrefix(line, " "))}
-		iData = oData
-		oData = nil
-	}
-
-	//Format data
-	for i := 0; i < len(iData); i++ {
-		switch format {
-			case "hosts":
-				if strings.HasPrefix(iData[i], "#") {
-					oData = append(oData, iData[i])
-				} else {oData = append(oData, *tbhPtr+" "+iData[i])}
-			case "dualserver":
-				if strings.HasPrefix(iData[i], "#") {
-					oData = append(oData, iData[i])
-				} else {oData = append(oData, iData[i]+"="+*tbhPtr)}
-			case "ipv6":
-				if strings.HasPrefix(iData[i], "#") {
-					oData = append(oData, iData[i])
-				} else {
-					oData = append(oData, *tbhPtr+" "+iData[i])
-					oData = append(oData, *tbh6Ptr+" "+iData[i])
-				}
-			case "adblock":
-				if strings.HasPrefix(iData[i], "#") {
-					oData = append(oData, "!"+strings.TrimPrefix(iData[i], "#"))
-				} else {
-					oData = append(oData, "||"+iData[i]+"^")
-				}
-			case "dnsmasq":
-				if strings.HasPrefix(iData[i], "#") {
-					oData = append(oData, iData[i])
-				} else {
-					oData = append(oData, "address=/"+iData[i]+"/")
-				}
-			case "privoxy":
-				if strings.HasPrefix(iData[i], "#") {
-					oData = append(oData, iData[i])
-				} else {
-					oData = append(oData, iData[i])
-					oData = append(oData, "."+iData[i])
-				}
-			case "rpz":
-				if strings.HasPrefix(iData[i], "#") {
-					oData = append(oData, ";"+strings.TrimPrefix(iData[i], "#"))
-				} else {
-					oData = append(oData, iData[i]+" CNAME .")
-					oData = append(oData, "*."+iData[i]+" CNAME .")
-				}
-			case "unbound":
-				if strings.HasPrefix(iData[i], "#") {
-					oData = append(oData, iData[i])
-				} else {
-					oData = append(oData, "local-zone: \""+iData[i]+"\" always_nxdomain")
-				}
-			default:
-				help(7)
-		}
-	}
-
-	iData = oData
-	oData = nil
-
-	//Write formatted data to output file or stdout and exit
-	writeFile(ofilePtr, &iData)
 }
