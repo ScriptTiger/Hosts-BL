@@ -37,6 +37,7 @@ func help(err int) {
 		"Usage: hosts-bl [options...] <source> <destination>\n"+
 		" -comments               Don't remove comments\n"+
 		" -compression <number>   Number of domains per line, 1 to 9\n"+
+		" -hash <number>          Hash size in bits (64|128|192|256)\n"+
 		" -dupe                   Don't check for and remove duplicates\n"+
 		" -f <format>             Destination format:\n"+
 		"                         adblock,dnsmasq,dualserver,fqdn,\n"+
@@ -88,15 +89,38 @@ func makeHash(host string) (hostHash uint64) {
 	return
 }
 
+// Function to reverse string
+func makeReverseString(host string) (string) {
+	hostByte := []byte(host)
+	count := len(hostByte)
+	reverseString := make([]byte, count)
+	for i, char := range hostByte {reverseString[count-i-1] = char}
+	return string(reverseString)
+}
+
 // Function to build index
-func buildIndex(hosts []string, format string) {
+func buildIndex(hosts []string, format string, hbits int) {
 	for _, host := range hosts {
-		hostHash := makeHash(host)
-		index = append(index, []uint64{uint64(hostID), hostHash})
-		if isReducible(format) {
-			binary.Write(saBuffer, binary.LittleEndian, hostHash)
-			binary.Write(saBuffer, binary.LittleEndian, uint64(0))
+		var reverseHost string
+		indexEntry := make([]uint64, 1+(hbits/64))
+		indexEntry[0] = uint64(hostID)
+		indexEntry[1] = makeHash(host)
+		if isReducible(format) {binary.Write(saBuffer, binary.LittleEndian, indexEntry[1])}
+		if hbits > 64 {
+			reverseHost = makeReverseString(host)
+			indexEntry[2] = makeHash(reverseHost)
+			if isReducible(format) {binary.Write(saBuffer, binary.LittleEndian, indexEntry[2])}
 		}
+		if hbits > 128 {
+			indexEntry[3] = makeHash(host+reverseHost)
+			if isReducible(format) {binary.Write(saBuffer, binary.LittleEndian, indexEntry[3])}
+		}
+		if hbits > 192 {
+			indexEntry[4] = makeHash(reverseHost+host)
+			if isReducible(format) {binary.Write(saBuffer, binary.LittleEndian, indexEntry[4])}
+		}
+		index = append(index, indexEntry)
+		if isReducible(format) {binary.Write(saBuffer, binary.LittleEndian, uint64(0))}
 		hostID++
 	}
 }
@@ -197,21 +221,29 @@ func flushGlob(format string, isHost bool, tbhPtr, tbh6Ptr *string, writer *bufi
 }
 
 // Function to zero out subdomains of domains already present
-func deSub(hosts []string) {
+func deSub(hosts []string, hbits int, dupe bool) {
 	for _, host := range hosts {
-		parentString := host
-		parentCount := len(strings.Split(parentString, "."))
-		for ; parentCount > 2; parentCount-- {
-			parentString = strings.Join(strings.Split(parentString, ".")[1:], ".")
- 			hostHash := makeHash(parentString)
-			binary.Write(lookupBuffer, binary.LittleEndian, uint64(0))
-			binary.Write(lookupBuffer, binary.LittleEndian, hostHash)
-			binary.Write(lookupBuffer, binary.LittleEndian, uint64(0))
-			offsets := saIndex.Lookup(lookupBuffer.Bytes(), 1)
-			lookupBuffer.Reset()
-			if offsets != nil {
-				index[hostID][1] = 0
-				break
+		if dupe || index[hostID][1] != 0 {
+			parentString := host
+			parentCount := len(strings.Split(parentString, "."))
+			for ; parentCount > 2; parentCount-- {
+				parentString = strings.Join(strings.Split(parentString, ".")[1:], ".")
+				binary.Write(lookupBuffer, binary.LittleEndian, uint64(0))
+				binary.Write(lookupBuffer, binary.LittleEndian, makeHash(parentString))
+				var reverseParentString string
+				if hbits > 64 {
+					reverseParentString = makeReverseString(parentString)
+					binary.Write(lookupBuffer, binary.LittleEndian, makeHash(reverseParentString))
+				}
+				if hbits > 128 {binary.Write(lookupBuffer, binary.LittleEndian, makeHash(parentString+reverseParentString))}
+				if hbits > 192 {binary.Write(lookupBuffer, binary.LittleEndian, makeHash(reverseParentString+parentString))}
+				binary.Write(lookupBuffer, binary.LittleEndian, uint64(0))
+				offsets := saIndex.Lookup(lookupBuffer.Bytes(), 1)
+				lookupBuffer.Reset()
+				if offsets != nil {
+					index[hostID][1] = 0
+					break
+				}
 			}
 		}
 		hostID++
@@ -219,14 +251,65 @@ func deSub(hosts []string) {
 }
 
 // Function to zero out duplicate hosts on index
-func deDupe() {
+func deDupe(hbits int) {
+	if hbits > 192 {
+		sort.SliceStable(index, func(i, j int) bool {
+			return index[i][4] < index[j][4]
+		})
+	}
+	if hbits > 128 {
+		sort.SliceStable(index, func(i, j int) bool {
+			return index[i][3] < index[j][3]
+		})
+	}
+	if hbits > 64 {
+		sort.SliceStable(index, func(i, j int) bool {
+			return index[i][2] < index[j][2]
+		})
+	}
 	sort.SliceStable(index, func(i, j int) bool {
 		return index[i][1] < index[j][1]
 	})
-	var lastLookup uint64
+	lastLookup := make([]uint64, hbits/64)
 	for i, lookup := range index {
-		if lookup[1] == lastLookup {index[i][1] = 0
-		} else {lastLookup = lookup[1]}
+		switch hbits {
+			case 64:
+				if lookup[1] == lastLookup[0] {
+					index[i][1] = 0
+				} else {
+					lastLookup[0] = lookup[1]
+				}
+			case 128:
+				if lookup[1] == lastLookup[0] &&
+				lookup[2] == lastLookup[1] {
+					index[i][1] = 0
+				} else {
+					lastLookup[0] = lookup[1]
+					lastLookup[1] = lookup[2]
+				}
+			case 192:
+				if lookup[1] == lastLookup[0] &&
+				lookup[2] == lastLookup[1] &&
+				lookup[3] == lastLookup[2] {
+					index[i][1] = 0
+				} else {
+					lastLookup[0] = lookup[1]
+					lastLookup[1] = lookup[2]
+					lastLookup[2] = lookup[3]
+				}
+			case 256:
+				if lookup[1] == lastLookup[0] &&
+				lookup[2] == lastLookup[1] &&
+				lookup[3] == lastLookup[2] &&
+				lookup[4] == lastLookup[3] {
+					index[i][1] = 0
+				} else {
+					lastLookup[0] = lookup[1]
+					lastLookup[1] = lookup[2]
+					lastLookup[2] = lookup[3]
+					lastLookup[3] = lookup[4]
+				}
+		}
 	}
 	sort.Slice(index, func(i, j int) bool {
 		return index[i][0] < index[j][0]
@@ -254,6 +337,7 @@ func main() {
 		iFilePtr *string
 		oFilePtr *string
 		cmp int
+		hbits int
 		fbhPtr *string
 		tbhPtr *string
 		tbh6Ptr *string
@@ -280,6 +364,7 @@ func main() {
 	*iFilePtr = ""
 	*oFilePtr = ""
 	cmp = -1
+	hbits = -1
 	*fmtPtr = "hosts"
 	*fbhPtr = "0.0.0.0"
 	tbhPtr = fbhPtr
@@ -312,40 +397,47 @@ func main() {
 					if err != nil {help(4)}
 					if cmp < 1 || cmp > 9 {help(5)}
 					continue
+				case "hash":
+					i++
+					if hbits != -1 {help(6)}
+					hbits, err = strconv.Atoi(os.Args[i])
+					if err != nil {help(7)}
+					if hbits != 64 && hbits != 128 && hbits != 192 && hbits != 256 {help(8)}
+					continue
 				case "from_blackhole":
 					i++
-					if *fbhPtr != "0.0.0.0" {help(6)}
+					if *fbhPtr != "0.0.0.0" {help(9)}
 					fbhPtr = &os.Args[i]
 					continue
 				case "to_blackhole":
 					i++
-					if *tbhPtr != "0.0.0.0" {help(7)}
+					if *tbhPtr != "0.0.0.0" {help(10)}
 					tbhPtr = &os.Args[i]
 					continue
 				case "to_blackhole_v6":
 					i++
-					if *tbh6Ptr != "::" {help(8)}
+					if *tbh6Ptr != "::" {help(11)}
 					tbh6Ptr = &os.Args[i]
 					continue
 				case "comments":
-					if cmts {help(9)}
+					if cmts {help(12)}
 					cmts = true
 					continue
 				case "dupe":
-					if dupe {help(10)}
+					if dupe {help(13)}
 					dupe = true
 					continue
 				case "o":
 					i++
-					if *oFilePtr != "" {help(11)}
+					if *oFilePtr != "" {help(14)}
 					oFilePtr = &os.Args[i]
 					continue
 				default:
-					help(12)
+					help(15)
 			}
 		} else if *iFilePtr == "" {iFilePtr = &os.Args[i]
 		} else if *oFilePtr == "" {oFilePtr = &os.Args[i]
-		} else {help(13)}
+		} else {help(16)}
 	}
 
 	// Print help if no input available
@@ -355,10 +447,11 @@ func main() {
 	format := strings.ToLower(*fmtPtr)
 
 	// Exit if invalid format is given
-	if !isValidFormat(format) {help(14)}
+	if !isValidFormat(format) {help(17)}
 
 	// Set default compression if none specified
 	if cmp == -1 {cmp = 9}
+	if hbits == -1 {hbits = 64}
 
 	// Set default output if none specified
 	if *oFilePtr == "" {
@@ -397,14 +490,14 @@ func main() {
 	if !dupe || isReducible(format) {
 		if *iFilePtr == "-" {scanner = bufio.NewScanner(iReader)
 		} else {scanner = bufio.NewScanner(iFile)}
-		for scanner.Scan() {buildIndex(scrubInput(scanner.Text(), fbhPtr, false), format)}
+		for scanner.Scan() {buildIndex(scrubInput(scanner.Text(), fbhPtr, false), format, hbits)}
 		if isReducible(format) {
 			saIndex = suffixarray.New(saBuffer.Bytes())
 		}
 	}
 
 	// Zero out duplicates as needed
-	if !dupe {deDupe()}
+	if !dupe {deDupe(hbits)}
 
 	// Zero out subdomains as needed
 	if isReducible(format) {
@@ -416,7 +509,7 @@ func main() {
 			iFile.Seek(0, io.SeekStart)
 			scanner = bufio.NewScanner(iFile)
 		}
-		for scanner.Scan() {deSub(scrubInput(scanner.Text(), fbhPtr, false))}
+		for scanner.Scan() {deSub(scrubInput(scanner.Text(), fbhPtr, false), hbits, dupe)}
 	}
 
 	// Format and write final list

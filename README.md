@@ -9,6 +9,7 @@ Argument                  | Description
 --------------------------|-----------------------------------------------------------------------------------------------------
  `-comments`              | Don't remove comments
  `-compression <number>`  | Number of domains per line, 1 to 9
+ `-hash <number>`         | Hash size in bits (64|128|192|256)
  `-dupe`                  | Don't check for and remove duplicates
  `-f <format>`            | Destination format:
 --------------------------| **adblock, dnsmasq, dualserver, fqdn,**
@@ -21,9 +22,13 @@ Argument                  | Description
 
 `-` can be used in place of `<file>` to designate standard input as the source and/or standard output as the destination. If standard input is used, standard output will be used by default if no destination file is given.
 
-By default, dragging and dropping a hosts file over a hosts-bl executable will automatically pick out lines beginning with `0.0.0.0`, check for and remove any duplicates, and compress it to 9 domains per line in standard hosts file format with `0.0.0.0` as the black hole address.
+By default, dragging and dropping a hosts file over a hosts-bl executable will automatically pick out lines beginning with `0.0.0.0`, assign a 64-bit hash to each host, check for and remove any duplicates, and compress it to 9 domains per line in standard hosts file format with `0.0.0.0` as the black hole address.
 
 In addition to removing duplicates by default, formats which support wild cards will automatically have wild card entries added and all child subdomains will be pruned from the list.
+
+For extremely large hosts files, it may be desirable to increase the hash size to avoid collisions. The more hosts there are in a list, the more risk there is for collisions. However, at the same time, the larger the hash size is, the slower the process will run. The default 64-bit hash size is perfectly fine for reasonably-sized hosts files, such as those from Steven Black.
+
+For additional performance gains when processing extremely large hosts files, you may want to skip checking for and removing duplicates if you know the lists you are processing don't have any duplicates, such as if they are curated lists and duplicates were already previously removed.
 
 # More About ScriptTiger
 
