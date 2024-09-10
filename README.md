@@ -9,7 +9,7 @@ Argument                  | Description
 --------------------------|-----------------------------------------------------------------------------------------------------
  `-comments`              | Don't remove comments
  `-compression <number>`  | Number of domains per line, 1 to 9
- `-hash <number>`         | Hash size in bits (64|128|192|256)
+ `-hash <number>`         | Hash size in bits (64\|128\|192\|256)
  `-dupe`                  | Don't check for and remove duplicates
  `-f <format>`            | Destination format:
 --------------------------| **adblock, dnsmasq, dualserver, fqdn,**
