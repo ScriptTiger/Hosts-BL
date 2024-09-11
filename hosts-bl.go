@@ -29,6 +29,8 @@ var (
 	wasHost bool
 	hasher maphash.Hash
 	//hasher hash.Hash64
+	addressStrings []string
+	addressInts [][]int
 )
 
 // Function to display help text and exit
@@ -316,6 +318,24 @@ func deDupe(hbits int) {
 	})
 }
 
+// Function to detect blackhole address
+func countAddresses(line string) {
+	if strings.Contains(line, " ") && strings.Contains(line, ".") {
+		lineSegments := strings.SplitAfterN(line, " ", 2)
+		if len(lineSegments) != 2 {return}
+		line = lineSegments[0]
+		for i, address := range addressStrings {
+			if address == line {
+				addressInts[i][1] = addressInts[i][1]+1
+				return
+			}
+		}
+		addressStrings = append(addressStrings, line)
+		addressInts = append(addressInts, []int{hostID, 0})
+		hostID++
+	}
+}
+
 // Function to scrub input
 func scrubInput(line string, fbhPtr *string, cmts bool) ([]string) {
 	if strings.Contains(line, " ") && strings.Contains(line, ".") && strings.HasPrefix(line, *fbhPtr) {
@@ -330,11 +350,23 @@ func scrubInput(line string, fbhPtr *string, cmts bool) ([]string) {
 	return nil
 }
 
+// Function to rewind reader and reset scanner
+func readerReset(iFilePtr *string, iReader *bytes.Reader, iFile *os.File) (*bufio.Scanner) {
+	hostID = 0
+	if *iFilePtr == "-" {
+		iReader.Seek(0, io.SeekStart)
+		return bufio.NewScanner(iReader)
+	} else {
+		iFile.Seek(0, io.SeekStart)
+		return bufio.NewScanner(iFile)
+	}
+}
+
 func main() {
 
 	// Declare variables
 	var (
-		// Flags
+		// Argument parameters
 		fmtPtr *string
 		iFilePtr *string
 		oFilePtr *string
@@ -355,21 +387,22 @@ func main() {
 		scanner *bufio.Scanner
 	)
 
-	// Initialize flag pointers
+	// Initialize argument parameter pointers
 	iFilePtr = new(string)
 	oFilePtr = new(string)
 	fmtPtr = new(string)
 	fbhPtr = new(string)
+	tbhPtr = new(string)
 	tbh6Ptr = new(string)
 
-	// Default flag values
+	// Default parameter values
 	*iFilePtr = ""
 	*oFilePtr = ""
 	cmp = -1
 	hbits = -1
 	*fmtPtr = "hosts"
-	*fbhPtr = "0.0.0.0"
-	tbhPtr = fbhPtr
+	*fbhPtr = ""
+	*tbhPtr = "0.0.0.0"
 	*tbh6Ptr = "::"
 	dupe = false
 	cmts = false
@@ -378,7 +411,7 @@ func main() {
 	stdinStat, _ := os.Stdin.Stat()
 	if stdinStat.Mode() & os.ModeNamedPipe != 0 {*iFilePtr = "-"}
 
-	// Push arguments to flag pointers
+	// Parse arguments
 	for i := 1; i < len(os.Args); i++ {
 		if strings.HasPrefix(os.Args[i], "-") {
 			switch strings.TrimPrefix(os.Args[i], "-") {
@@ -408,7 +441,7 @@ func main() {
 					continue
 				case "from_blackhole":
 					i++
-					if *fbhPtr != "0.0.0.0" {help(9)}
+					if *fbhPtr != "" {help(9)}
 					fbhPtr = &os.Args[i]
 					continue
 				case "to_blackhole":
@@ -451,7 +484,7 @@ func main() {
 	// Exit if invalid format is given
 	if !isValidFormat(format) {help(17)}
 
-	// Set default compression if none specified
+	// Set defaults for unset arguments
 	if cmp == -1 {cmp = 9}
 	if hbits == -1 {hbits = 64}
 
@@ -470,6 +503,18 @@ func main() {
 		defer iFile.Close()
 	}
 	if err != nil {panic(err)}
+
+	// Detect source blackhole address if none specified
+	if *fbhPtr == "" {
+		scanner = readerReset(iFilePtr, iReader, iFile)
+		for scanner.Scan() {countAddresses(scanner.Text())}
+		if len(addressInts) == 0 {help(18)}
+		sort.SliceStable(addressInts, func(i, j int) bool {
+			return addressInts[j][1] < addressInts[i][1]
+		})
+		blackhole := addressInts[0][0]
+		*fbhPtr = addressStrings[blackhole]
+	}
 
 	if *oFilePtr == "-" {oFile = os.Stdout
 	} else {
@@ -490,8 +535,7 @@ func main() {
 
 	// Build index
 	if !dupe || isReducible(format) {
-		if *iFilePtr == "-" {scanner = bufio.NewScanner(iReader)
-		} else {scanner = bufio.NewScanner(iFile)}
+		scanner = readerReset(iFilePtr, iReader, iFile)
 		for scanner.Scan() {buildIndex(scrubInput(scanner.Text(), fbhPtr, false), format, hbits)}
 		if isReducible(format) {
 			saIndex = suffixarray.New(saBuffer.Bytes())
@@ -503,26 +547,12 @@ func main() {
 
 	// Zero out subdomains as needed
 	if isReducible(format) {
-		hostID = 0
-		if *iFilePtr == "-" {
-			iReader.Seek(0, io.SeekStart)
-			scanner = bufio.NewScanner(iReader)
-		} else {
-			iFile.Seek(0, io.SeekStart)
-			scanner = bufio.NewScanner(iFile)
-		}
+		scanner = readerReset(iFilePtr, iReader, iFile)
 		for scanner.Scan() {deSub(scrubInput(scanner.Text(), fbhPtr, false), hbits, dupe)}
 	}
 
 	// Format and write final list
-	hostID = 0
-	if *iFilePtr == "-" {
-		iReader.Seek(0, io.SeekStart)
-		scanner = bufio.NewScanner(iReader)
-	} else {
-		iFile.Seek(0, io.SeekStart)
-		scanner = bufio.NewScanner(iFile)
-	}
+	scanner = readerReset(iFilePtr, iReader, iFile)
 	for scanner.Scan() {writeLine(scrubInput(scanner.Text(), fbhPtr, true), writer, format, dupe, cmts, cmp, tbhPtr, tbh6Ptr)}
 	if glob.Len() != 0 {flushGlob(format, wasHost, tbhPtr, tbh6Ptr, writer)}
 	writer.Flush()
