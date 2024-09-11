@@ -318,8 +318,10 @@ func deDupe(hbits int) {
 
 // Function to scrub input
 func scrubInput(line string, fbhPtr *string, cmts bool) ([]string) {
-	if strings.ContainsAny(line, " .") && strings.HasPrefix(line, *fbhPtr) {
-		line = strings.SplitAfterN(line, " ", 2)[1]
+	if strings.Contains(line, " ") && strings.Contains(line, ".") && strings.HasPrefix(line, *fbhPtr) {
+		lineSegments := strings.SplitAfterN(line, " ", 2)
+		if len(lineSegments) != 2 {return nil}
+		line = lineSegments[1]
 		if strings.ContainsAny(line, "#") {line = strings.TrimSuffix(strings.SplitAfterN(line, "#", 2)[0], "#")}
 		line = strings.TrimSpace(line)
 		if line == "0.0.0.0" {return nil}
