@@ -138,25 +138,25 @@ func writeLine(hosts []string, writer *bufio.Writer, format string, dupe, cmts b
 					case "ipv6":
 						compress(host, format, cmp, true, tbhPtr, tbh6Ptr, writer)
 					case "dualserver":
-						writer.WriteString(host+"="+*tbhPtr+eol)
+						writer.WriteString(host+"="+*tbhPtr+EOL)
 					case "adblock":
-						writer.WriteString("||"+host+"^"+eol)
+						writer.WriteString("||"+host+"^"+EOL)
 					case "dnsmasq":
-						writer.WriteString("address=/"+host+"/"+eol)
+						writer.WriteString("address=/"+host+"/"+EOL)
 					case "privoxy":
 						writer.WriteString(
-							host+eol+
-							"."+host+eol,
+							host+EOL+
+							"."+host+EOL,
 						)
 					case "rpz":
 						writer.WriteString(
-							host+" CNAME ."+eol+
-							"*."+host+" CNAME ."+eol,
+							host+" CNAME ."+EOL+
+							"*."+host+" CNAME ."+EOL,
 						)
 					case "unbound":
-						writer.WriteString("local-zone: \""+host+"\" always_nxdomain"+eol)
+						writer.WriteString("local-zone: \""+host+"\" always_nxdomain"+EOL)
 					default:
-						writer.WriteString(host+eol)
+						writer.WriteString(host+EOL)
 				}
 			}
 			hostID++
@@ -167,11 +167,11 @@ func writeLine(hosts []string, writer *bufio.Writer, format string, dupe, cmts b
 				case "ipv6":
 					compress(host, format, cmp, false, tbhPtr, tbh6Ptr, writer)
 				case "adblock":
-					writer.WriteString("!"+strings.TrimPrefix(host, "#")+eol)
+					writer.WriteString("!"+strings.TrimPrefix(host, "#")+EOL)
 				case "rpz":
-					writer.WriteString(";"+strings.TrimPrefix(host, "#")+eol)
+					writer.WriteString(";"+strings.TrimPrefix(host, "#")+EOL)
 				default:
-					writer.WriteString(host+eol)
+					writer.WriteString(host+EOL)
 			}
 		}
 	}
@@ -182,14 +182,14 @@ func compress(host, format string, cmp int, isHost bool, tbhPtr, tbh6Ptr *string
 	if cmp == 1 {
 		if isHost {
 			if format == "hosts" {
-				writer.WriteString(*tbhPtr+" "+host+eol)
+				writer.WriteString(*tbhPtr+" "+host+EOL)
 			} else {
 				writer.WriteString(
-					*tbhPtr+" "+host+eol+
-					*tbh6Ptr+" "+host+eol,
+					*tbhPtr+" "+host+EOL+
+					*tbh6Ptr+" "+host+EOL,
 				)
 			}
-		} else {writer.WriteString(host+eol)}
+		} else {writer.WriteString(host+EOL)}
 		return
 	}
 	if cmpLvl == -1 {
@@ -210,14 +210,14 @@ func compress(host, format string, cmp int, isHost bool, tbhPtr, tbh6Ptr *string
 func flushGlob(format string, isHost bool, tbhPtr, tbh6Ptr *string, writer *bufio.Writer) {
 	if isHost {
 		if format == "hosts" {
-			writer.WriteString(*tbhPtr+glob.String()+eol)
+			writer.WriteString(*tbhPtr+glob.String()+EOL)
 		} else {
 			writer.WriteString(
-				*tbhPtr+glob.String()+eol+
-				*tbh6Ptr+glob.String()+eol,
+				*tbhPtr+glob.String()+EOL+
+				*tbh6Ptr+glob.String()+EOL,
 			)
 		}
-	} else {writer.WriteString(glob.String()+eol)}
+	} else {writer.WriteString(glob.String()+EOL)}
 	cmpLvl = 0
 	glob.Reset()
 }
