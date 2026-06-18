@@ -385,6 +385,7 @@ func main() {
 		iData []byte
 		iReader *bytes.Reader
 		scanner *bufio.Scanner
+		stdin bool
 	)
 
 	// Initialize argument parameter pointers
@@ -407,9 +408,9 @@ func main() {
 	dupe = false
 	cmts = false
 
-	// Check if any data available from standard input and use it as default source if there is
+	// Check if standard input available
 	stdinStat, _ := os.Stdin.Stat()
-	if stdinStat.Mode() & os.ModeNamedPipe != 0 {*iFilePtr = "-"}
+	if stdinStat.Mode() & os.ModeNamedPipe != 0 {stdin = true}
 
 	// Parse arguments
 	for i := 1; i < len(os.Args); i++ {
@@ -423,66 +424,77 @@ func main() {
 				case "i":
 					i++
 					if *iFilePtr != "" {help(2)}
+					if os.Args[i] == "-" && !stdin {help(3)}
 					iFilePtr = &os.Args[i]
 					continue
 				case "compression":
 					i++
-					if cmp != -1 {help(3)}
+					if cmp != -1 {help(4)}
 					cmp, err = strconv.Atoi(os.Args[i])
-					if err != nil {help(4)}
-					if cmp < 1 || cmp > 9 {help(5)}
+					if err != nil {help(5)}
+					if cmp < 1 || cmp > 9 {help(6)}
 					continue
 				case "hash":
 					i++
-					if hbits != -1 {help(6)}
+					if hbits != -1 {help(7)}
 					hbits, err = strconv.Atoi(os.Args[i])
-					if err != nil {help(7)}
-					if hbits != 64 && hbits != 128 && hbits != 192 && hbits != 256 {help(8)}
+					if err != nil {help(8)}
+					if hbits != 64 && hbits != 128 && hbits != 192 && hbits != 256 {help(9)}
 					continue
 				case "from_blackhole":
 					i++
-					if *fbhPtr != "" {help(9)}
+					if *fbhPtr != "" {help(10)}
 					fbhPtr = &os.Args[i]
 					continue
 				case "to_blackhole":
 					i++
-					if *tbhPtr != "0.0.0.0" {help(10)}
+					if *tbhPtr != "0.0.0.0" {help(11)}
 					tbhPtr = &os.Args[i]
 					continue
 				case "to_blackhole_v6":
 					i++
-					if *tbh6Ptr != "::" {help(11)}
+					if *tbh6Ptr != "::" {help(12)}
 					tbh6Ptr = &os.Args[i]
 					continue
 				case "comments":
-					if cmts {help(12)}
+					if cmts {help(13)}
 					cmts = true
 					continue
 				case "dupe":
-					if dupe {help(13)}
+					if dupe {help(14)}
 					dupe = true
 					continue
 				case "o":
 					i++
-					if *oFilePtr != "" {help(14)}
+					if *oFilePtr != "" {help(15)}
 					oFilePtr = &os.Args[i]
 					continue
 				default:
-					help(15)
+					help(16)
 			}
 		} else if *iFilePtr == "" {iFilePtr = &os.Args[i]
 		} else if *oFilePtr == "" {oFilePtr = &os.Args[i]
-		} else {help(16)}
+		} else {help(17)}
 	}
 
-	// Print help if no input available
-	if *iFilePtr == "" {help(0)}
+	// Default to standard input if available and no input given, otherwise print help and exit if no input
+	if *iFilePtr == "" {
+		if stdin {*iFilePtr = "-"
+		} else {help(0)}
+	}
+
+	// If standard input is available, but not used, discard the input while also keeping the pipe alive to avoid errors
+	if stdin && *iFilePtr != "-" {
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+		}()
+	}
 
 	// Initialize format string for quick reference
 	format := strings.ToLower(*fmtPtr)
 
 	// Exit if invalid format is given
-	if !isValidFormat(format) {help(17)}
+	if !isValidFormat(format) {help(18)}
 
 	// Set defaults for unset arguments
 	if cmp == -1 {cmp = 9}
@@ -508,7 +520,7 @@ func main() {
 	if *fbhPtr == "" {
 		scanner = readerReset(iFilePtr, iReader, iFile)
 		for scanner.Scan() {countAddresses(scanner.Text())}
-		if len(addressInts) == 0 {help(18)}
+		if len(addressInts) == 0 {help(19)}
 		sort.SliceStable(addressInts, func(i, j int) bool {
 			return addressInts[j][1] < addressInts[i][1]
 		})
