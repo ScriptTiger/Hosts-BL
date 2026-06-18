@@ -31,6 +31,7 @@ var (
 	//hasher hash.Hash64
 	addressStrings []string
 	addressInts [][]int
+	stdin bool
 )
 
 // Function to display help text and exit
@@ -49,6 +50,7 @@ func help(err int) {
 		" -o <file>               Destination file\n"+
 		" -to_blackhole <IPv4>    Black hole address in destination\n"+
 		" -to_blackhole_v6 <IPv6> IPv6 Black hole address in destination\n")
+	if stdin {_, _ = io.Copy(io.Discard, os.Stdin)}
 	os.Exit(err)
 }
 
@@ -385,7 +387,7 @@ func main() {
 		iData []byte
 		iReader *bytes.Reader
 		scanner *bufio.Scanner
-		stdin bool
+		headlessSrc bool
 	)
 
 	// Initialize argument parameter pointers
@@ -469,12 +471,26 @@ func main() {
 					if *oFilePtr != "" {help(15)}
 					oFilePtr = &os.Args[i]
 					continue
+				case "":
+					if *iFilePtr == "" {
+						iFilePtr = &os.Args[i]
+						headlessSrc = true
+					} else if *oFilePtr == "" {oFilePtr = &os.Args[i]
+					} else {help(16)}
 				default:
-					help(16)
+					help(17)
 			}
-		} else if *iFilePtr == "" {iFilePtr = &os.Args[i]
+		} else if *iFilePtr == "" {
+			iFilePtr = &os.Args[i]
+			headlessSrc = true
 		} else if *oFilePtr == "" {oFilePtr = &os.Args[i]
-		} else {help(17)}
+		} else {help(18)}
+	}
+
+	// If one headless argument is given and standard input is available, use headless argument as output and standard input as input
+	if headlessSrc && *oFilePtr == "" && stdin {
+		*oFilePtr = *iFilePtr
+		*iFilePtr = "-"
 	}
 
 	// Default to standard input if available and no input given, otherwise print help and exit if no input
@@ -494,7 +510,7 @@ func main() {
 	format := strings.ToLower(*fmtPtr)
 
 	// Exit if invalid format is given
-	if !isValidFormat(format) {help(18)}
+	if !isValidFormat(format) {help(19)}
 
 	// Set defaults for unset arguments
 	if cmp == -1 {cmp = 9}
@@ -520,7 +536,7 @@ func main() {
 	if *fbhPtr == "" {
 		scanner = readerReset(iFilePtr, iReader, iFile)
 		for scanner.Scan() {countAddresses(scanner.Text())}
-		if len(addressInts) == 0 {help(19)}
+		if len(addressInts) == 0 {help(20)}
 		sort.SliceStable(addressInts, func(i, j int) bool {
 			return addressInts[j][1] < addressInts[i][1]
 		})
